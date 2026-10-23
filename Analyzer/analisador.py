@@ -14,12 +14,14 @@ Novidades da V2:
   - Validação de identidade de cor do comandante (Commander, Brawl e Historic Brawl)
   - Verificação se o comandante pode, de fato, ser comandante
   - Seção "Comandante" no relatório, listando cartas fora da identidade de cor
+  - Cartas incolores contadas à parte; comandante incolor identificado explicitamente
+  - Distribuição de cores por custo de mana OU por identidade de cor (custo + habilidades)
 """
 import re
 import time
 import requests
 
-VERSAO = "2.2"
+VERSAO = "2.3"
 
 TIMEOUT_API = 30  # segundos
 
@@ -512,6 +514,7 @@ def secao_comandante(entradas):
         "nomes": [e["data"]["name"] for e in comandantes],
         "identidade": _ordenar_cores(cores_cmd),
         "identidade_texto": formatar_cores(cores_cmd),
+        "incolor": not cores_cmd,
         "fora_da_identidade": [
             {"nome": nome, "cores": _ordenar_cores(exc), "cores_texto": formatar_cores(exc)}
             for nome, exc in fora
@@ -523,6 +526,38 @@ def _preco_usd(data):
     prices = data.get("prices", {})
     valor = prices.get("usd") or prices.get("usd_foil")
     return float(valor) if valor else None
+
+
+def cores_da_carta(data):
+    """
+    Retorna (cores_custo, cores_identidade), listas na ordem WUBRG.
+      - cores_custo: cores da carta em si (custo de mana; em dupla face, a face da frente)
+      - cores_identidade: identidade de cor da Scryfall, que também inclui símbolos de mana
+        escritos nas habilidades (ex.: "{T}: Add {G}" ou "{2}{R}: ...") e a outra face
+    """
+    custo = data.get("colors")
+    if not custo and data.get("card_faces"):
+        custo = data["card_faces"][0].get("colors", [])
+    return (_ordenar_cores(set(custo or [])),
+            _ordenar_cores(set(data.get("color_identity", []))))
+
+
+def distribuicao_cores(principal, base="identidade", incluir_terrenos=True):
+    """
+    Conta quantas cartas do deck principal têm cada cor.
+      base="custo":      usa só as cores do custo de mana
+      base="identidade": usa a identidade de cor (custo + habilidades + outra face)
+    Cartas sem cor entram em "Incolor". Carta multicolorida conta em cada uma das suas cores.
+    """
+    campo = "cores_custo" if base == "custo" else "cores_identidade"
+    contagem = {}
+    for e in principal:
+        if e["terreno"] and not incluir_terrenos:
+            continue
+        for cor in (e[campo] or ["Incolor"]):
+            contagem[cor] = contagem.get(cor, 0) + e["qtd"]
+    ordem = list(ORDEM_CORES) + ["Incolor"]
+    return {cor: contagem[cor] for cor in ordem if cor in contagem}
 
 
 def analisar_deck(cartas, nome_deck=None, progresso=None):
@@ -540,7 +575,6 @@ def analisar_deck(cartas, nome_deck=None, progresso=None):
     avisos = []
     total_cartas = 0
     curva_mana = {}
-    cores_count = {}
     preco_total = 0.0
     tipos_count = {"Creature": 0, "Instant": 0, "Sorcery": 0, "Land": 0,
                    "Artifact": 0, "Enchantment": 0, "Planeswalker": 0}
@@ -590,19 +624,8 @@ def analisar_deck(cartas, nome_deck=None, progresso=None):
         cmc = int(data.get("cmc", 0))
         curva_mana[cmc] = curva_mana.get(cmc, 0) + qtd
 
-        # 2. Cores
-        cores = data.get("colors", [])
-        if not cores and "card_faces" in data:
-            # Em cartas dupla face, pega as cores da primeira face se estiver vazio
-            cores = data["card_faces"][0].get("colors", [])
-        if not cores:
-            cores = data.get("color_identity", [])
-
-        if not cores:
-            cores_count["Incolor/Terreno"] = cores_count.get("Incolor/Terreno", 0) + qtd
-        else:
-            for cor in cores:
-                cores_count[cor] = cores_count.get(cor, 0) + qtd
+        # 2. Cores: do custo de mana e da identidade (inclui símbolos nas habilidades)
+        cores_custo, cores_identidade = cores_da_carta(data)
 
         # 3. Tipos de carta (em dupla face, considera apenas a face da frente)
         type_frente = data.get("type_line", "").split("//")[0]
@@ -618,6 +641,10 @@ def analisar_deck(cartas, nome_deck=None, progresso=None):
             "terreno": "Land" in type_frente,
             "comandante": e["zona"] == "commander",
             "preco": _preco_usd(data),
+            "cores_custo": cores_custo,
+            "cores_identidade": cores_identidade,
+            # cores que a carta só tem por causa das habilidades (ou da outra face)
+            "cores_habilidade": [c for c in cores_identidade if c not in cores_custo],
         })
 
     sideboard = [{
@@ -626,6 +653,7 @@ def analisar_deck(cartas, nome_deck=None, progresso=None):
         "cmc": int(e["data"].get("cmc", 0)),
         "tipo": e["data"].get("type_line", ""),
         "preco": _preco_usd(e["data"]),
+        "cores_identidade": cores_da_carta(e["data"])[1],
     } for e in sideboard_entradas]
 
     return {
@@ -635,7 +663,8 @@ def analisar_deck(cartas, nome_deck=None, progresso=None):
         "total_side": sum(e["qtd"] for e in sideboard),
         "preco_total": preco_total,
         "curva_mana": curva_mana,
-        "cores": cores_count,
+        "cores": distribuicao_cores(principal, "identidade"),
+        "cores_custo": distribuicao_cores(principal, "custo"),
         "tipos": tipos_count,
         "principal": principal,
         "sideboard": sideboard,
@@ -689,7 +718,11 @@ def imprimir_relatorio(res):
         barras = "█" * res["curva_mana"][cmc]
         print(f"  CMC {cmc}: {barras} ({res['curva_mana'][cmc]})")
 
-    print("\n🎨 Distribuição de Cores:")
+    print("\n🎨 Distribuição de Cores (por custo de mana):")
+    for cor, count in res["cores_custo"].items():
+        print(f"  {NOMES_CORES.get(cor, cor)}: {count} cartas")
+
+    print("\n🎨 Distribuição de Cores (por identidade: custo + habilidades):")
     for cor, count in res["cores"].items():
         print(f"  {NOMES_CORES.get(cor, cor)}: {count} cartas")
 
@@ -702,6 +735,9 @@ def imprimir_relatorio(res):
         print("\n👑 Comandante e Identidade de Cor:")
         print(f"  Comandante: {' + '.join(cmd['nomes'])}")
         print(f"  Identidade de cor: {cmd['identidade_texto']}")
+        if cmd["incolor"]:
+            print("  ℹ️ Comandante incolor: só entram cartas sem identidade de cor "
+                  "(ex.: artefatos incolores, Wastes).")
         fora = cmd["fora_da_identidade"]
         if not fora:
             print("  ✅ Todas as cartas respeitam a identidade de cor do comandante.")

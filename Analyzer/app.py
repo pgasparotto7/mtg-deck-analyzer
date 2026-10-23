@@ -13,6 +13,7 @@ from analisador import (
     ErroScryfall,
     analisar_deck,
     carregar_deck_de_texto,
+    distribuicao_cores,
 )
 
 st.set_page_config(page_title="MTG - Deck Analyzer", page_icon="🃏", layout="wide")
@@ -34,9 +35,15 @@ def analisar_em_cache(cartas, nome_deck):
     return analisar_deck(cartas, nome_deck)
 
 
+def texto_identidade(cores):
+    """['R', 'G'] -> 'RG'; lista vazia -> 'Incolor'."""
+    return "".join(cores) if cores else "Incolor"
+
+
 def tabela_cartas(itens):
     return pd.DataFrame([
         {"Qtd": e["qtd"], "Carta": e["nome"], "CMC": e["cmc"],
+         "Identidade": texto_identidade(e["cores_identidade"]),
          "Tipo": e["tipo"], "Preço (USD)": e["preco"]}
         for e in itens
     ])
@@ -71,11 +78,11 @@ def mostrar_resultado(resultado, avisos_leitura):
 
     # --- Visão geral ---------------------------------------------------------
     with abas["Visão geral"]:
+        sem_terrenos = st.checkbox("Ocultar terrenos nos gráficos de curva e cores", value=True)
         col_a, col_b = st.columns(2)
 
         with col_a:
             st.subheader("Curva de mana")
-            sem_terrenos = st.checkbox("Ocultar terrenos", value=True)
             curva = {}
             for e in resultado["principal"]:
                 if sem_terrenos and e["terreno"]:
@@ -90,9 +97,20 @@ def mostrar_resultado(resultado, avisos_leitura):
 
         with col_b:
             st.subheader("Distribuição de cores")
-            cores = {NOMES_CORES.get(c, c): n for c, n in resultado["cores"].items()}
+            base_cores = st.radio(
+                "Contar cores por",
+                ["Identidade de cor (custo + habilidades)", "Só custo de mana"],
+                horizontal=True,
+            )
+            base = "identidade" if base_cores.startswith("Identidade") else "custo"
+            cores = {NOMES_CORES.get(c, c): n for c, n in
+                     distribuicao_cores(resultado["principal"], base, not sem_terrenos).items()}
             if cores:
                 st.bar_chart(pd.Series(cores, name="Cartas"))
+                st.caption("Carta com mais de uma cor conta em cada uma delas. "
+                           "A identidade inclui cores que só aparecem em habilidades.")
+            else:
+                st.caption("Sem cartas para mostrar.")
 
             st.subheader("Tipos de carta")
             tipos = {NOMES_TIPOS[t]: n for t, n in resultado["tipos"].items() if n}
@@ -105,6 +123,11 @@ def mostrar_resultado(resultado, avisos_leitura):
         with abas["Comandante"]:
             st.markdown(f"**Comandante:** {' + '.join(cmd['nomes'])}")
             st.markdown(f"**Identidade de cor:** {cmd['identidade_texto']}")
+            if cmd["incolor"]:
+                st.info("Comandante incolor: o deck só pode ter cartas sem identidade de cor "
+                        "(artefatos incolores, Wastes etc.). Terrenos básicos coloridos e "
+                        "cartas com símbolos de mana de qualquer cor, inclusive em "
+                        "habilidades, ficam de fora.")
             fora = cmd["fora_da_identidade"]
             if not fora:
                 st.success("Todas as cartas respeitam a identidade de cor do comandante.")
@@ -156,7 +179,7 @@ def mostrar_resultado(resultado, avisos_leitura):
 # Página
 # ---------------------------------------------------------------------------
 
-st.title("Analisador de decks de Magic")
+st.title("MTG - Deck Analyzer")
 st.caption("Cole a lista do seu deck (Moxfield, Arena, MTGO ou texto simples) e veja "
            "curva de mana, cores, preço e legalidade em cada formato.")
 
