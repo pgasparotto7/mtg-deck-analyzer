@@ -22,3 +22,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Dependências e caches
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Backups e pastas temporárias
+backup/
+
+# Configurações do editor
+.vscode/
