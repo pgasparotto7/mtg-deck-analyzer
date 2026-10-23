@@ -1,0 +1,81 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 32px 24px 48px;
+  text-align: left;
+}
+
+.intro h1 {
+  font-size: 32px;
+  margin: 0 0 8px;
+}
+
+.intro p {
+  max-width: 42rem;
+}
+
+.deck-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.deck-form label {
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.deck-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-size: 15px;
+  line-height: 1.45;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--text-h);
+  resize: vertical;
+}
+
+.deck-form button {
+  align-self: flex-start;
+  font-size: 16px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  color: var(--text-h);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  cursor: pointer;
+}
+
+.deck-form button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.results h2 {
+  margin-top: 8px;
+}
+
+.results ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.results .qty {
+  font-family: var(--mono);
+  font-weight: 600;
+}
+
+.results .invalid {
+  color: #b45309;
+}
+
+@media (prefers-color-scheme: dark) {
+  .results .invalid {
+    color: #fbbf24;
+  }
+}
