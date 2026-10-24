@@ -8,6 +8,7 @@ import streamlit as st
 
 from analisador import ErroScryfall, carregar_deck_de_texto, resolver_cartas
 from orcamento import (
+    ECONOMIA_MINIMA_IMPRESSAO_USD,
     LIMITE_TROCA_PADRAO,
     NOMES_FORMATOS,
     RIGOR,
@@ -19,11 +20,31 @@ from orcamento import (
 ALTURA_BLOCOS = 560  # os dois blocos têm exatamente a mesma altura
 
 CONFIG_COLUNAS = {
-    "US$ original": st.column_config.NumberColumn(format="$%.2f"),
-    "US$ sugestão": st.column_config.NumberColumn(format="$%.2f"),
+    "US$ orig.": st.column_config.NumberColumn(format="$%.2f"),
+    "US$ sug.": st.column_config.NumberColumn(format="$%.2f"),
     "Economia": st.column_config.NumberColumn(format="$%.2f"),
-    "Semelhança": st.column_config.NumberColumn(format="%.2f"),
 }
+
+
+def _pct(valor):
+    return "—" if valor is None else f"{valor}%"
+
+
+def _texto_colecao(o, e):
+    nova = f"{e['colecao']} ({e['colecao_codigo']})" if e["colecao"] else "—"
+    if e["tipo_troca"] == "impressao":
+        antiga = f"{o['colecao']} ({o['colecao_codigo']})" if o["colecao"] else "?"
+        return f"{nova} · antes: {antiga}"
+    return nova
+
+
+def _texto_sinergia_edhrec(o, e):
+    if e["tipo_troca"] == "impressao":
+        return "mesma carta"
+    if e["edhrec_pct"] is None:
+        return "—"
+    antes = f"{o['edhrec_pct']}% → " if o["edhrec_pct"] is not None else ""
+    return f"{antes}{e['edhrec_pct']}%"
 
 
 def _mostrar_resultado(estado):
@@ -37,6 +58,8 @@ def _mostrar_resultado(estado):
 
     for aviso in estado["avisos"] + r["avisos"]:
         st.info(aviso)
+    if r["edhrec"]["usado"]:
+        st.caption(f"Sinergia do EDHREC para o comandante ({r['edhrec']['slug']}).")
     if estado["falhas"]:
         nomes = ", ".join(f"{f['qtd']}x {f['nome']}" for f in estado["falhas"])
         st.warning(f"Não encontradas na Scryfall e fora desta lista: {nomes}.")
@@ -56,12 +79,15 @@ def _mostrar_resultado(estado):
             linhas.append({
                 "Qtd": o["qtd"],
                 "Original": o["nome"],
-                "US$ original": o["preco"],
+                "US$ orig.": o["preco"],
                 "Sugestão": e["nome"],
-                "US$ sugestão": e["preco"],
-                "Tipo": ("Mesma carta, impressão mais barata" if e["tipo_troca"] == "impressao"
-                         else "Carta parecida"),
-                "Semelhança": e["similaridade"],
+                "US$ sug.": e["preco"],
+                "Tipo de troca": ("Mesma carta, outra impressão" if e["tipo_troca"] == "impressao"
+                                  else "Carta diferente"),
+                "Coleção": _texto_colecao(o, e),
+                "Sinergia EDHREC": _texto_sinergia_edhrec(o, e),
+                "Sinergia estimada": _pct(e["estimada_pct"]),
+                "Função": f"{round(e['funcao'] * 100)}%",
                 "Economia": t["economia"],
             })
         st.dataframe(pd.DataFrame(linhas), hide_index=True, column_config=CONFIG_COLUNAS)
@@ -71,13 +97,14 @@ def _mostrar_resultado(estado):
                 o, e = t["original"], t["escolha"]
                 st.markdown(f"**{o['nome']}** → **{e['nome']}**")
                 ca, cb = st.columns(2)
-                ca.caption(f"{o['tipo']} · CMC {o['cmc']} · ${o['preco']:.2f}")
+                ca.caption(f"{o['tipo']} · CMC {o['cmc']} · ${o['preco']:.2f} · {o['colecao']}")
                 ca.text(o["texto"] or "(sem texto)")
-                cb.caption(f"{e['tipo']} · CMC {e['cmc']} · ${e['preco']:.2f}")
+                cb.caption(f"{e['tipo']} · CMC {e['cmc']} · ${e['preco']:.2f} · {e['colecao']}")
                 cb.text(e["texto"] or "(sem texto)")
                 if t["alternativas"]:
                     st.caption("Outras opções: " + "; ".join(
-                        f"{a['nome']} (${a['preco']:.2f}, semelhança {a['similaridade']:.2f})"
+                        f"{a['nome']} (${a['preco']:.2f}; sinergia EDHREC {_pct(a['edhrec_pct'])}, "
+                        f"estimada {_pct(a['estimada_pct'])}; função {round(a['funcao'] * 100)}%)"
                         for a in t["alternativas"]))
                 st.divider()
 
@@ -89,9 +116,19 @@ def _mostrar_resultado(estado):
 
     st.markdown("**Lista budget**")
     st.code(formatar_lista(r), language=None)
-    st.caption("Sugestões automáticas, com base no texto das cartas: confira se o efeito "
-               "serve para a sua estratégia antes de trocar. Preços em USD (cartas físicas), "
-               "segundo a Scryfall.")
+    with st.expander("Como ler as métricas"):
+        st.markdown(
+            "- **Sinergia EDHREC:** % dos decks do comandante que usam a carta menos % dos "
+            "decks da mesma identidade de cor que a usam. Vem do EDHREC e só existe com comandante. "
+            "Em trocas por outra carta, aparece 'antes → depois'.\n"
+            "- **Sinergia estimada:** o quanto a carta combina com os temas do seu deck e do "
+            "comandante (mecânicas, palavras-chave, tipos de criatura). É uma estimativa nossa, "
+            "não uma estatística de decks reais.\n"
+            "- **Função:** o quanto a carta faz o mesmo que a original, pelo texto de regras. "
+            "O tipo de carta pode ser diferente.\n"
+            "- A escolha pesa 50% sinergia, 35% função e 15% economia. Preços em USD (cartas "
+            "físicas), segundo a Scryfall.")
+    st.caption("Sugestões automáticas: confira se o efeito serve para a sua estratégia antes de trocar.")
 
 
 def pagina_budget():
@@ -104,13 +141,18 @@ def pagina_budget():
         arquivo = st.file_uploader("Deposite aqui o arquivo .txt do deck", type=["txt"],
                                    key="budget_arquivo")
     with topo_dir:
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         limite = c1.number_input("Trocar cartas acima de (US$)", min_value=0.0,
                                  value=LIMITE_TROCA_PADRAO, step=0.5, key="budget_limite")
         nome_formato = c2.selectbox("Formato", ["Automático"] + list(NOMES_FORMATOS),
                                     key="budget_formato",
                                     help="Automático: Commander se o deck tiver comandante; "
                                          "senão, sem filtro de formato.")
+        economia_impressao = c3.number_input(
+            "Outra impressão só se economizar (US$)", min_value=0.0,
+            value=ECONOMIA_MINIMA_IMPRESSAO_USD, step=0.5, key="budget_impressao",
+            help="A mesma carta em outra coleção só é sugerida se economizar pelo menos este "
+                 "valor e custar no máximo metade do preço atual.")
         rigor = st.select_slider("Semelhança exigida", options=list(RIGOR),
                                  value="Equilibrado", key="budget_rigor")
         gerar = st.button("Gerar versão budget", type="primary",
@@ -134,10 +176,12 @@ def pagina_budget():
                 formato = (formato_automatico(entradas) if nome_formato == "Automático"
                            else NOMES_FORMATOS[nome_formato])
 
-                def andamento(i, total, nome):
-                    barra.progress(i / total, text=f"Procurando alternativas ({i}/{total}): {nome}")
+                def andamento(fracao, mensagem):
+                    barra.progress(min(1.0, fracao), text=mensagem)
 
-                resultado = gerar_deck_budget(entradas, formato, limite, RIGOR[rigor], andamento)
+                resultado = gerar_deck_budget(
+                    entradas, formato, limite, RIGOR[rigor], andamento,
+                    economia_minima_impressao=economia_impressao)
             except ErroScryfall as erro:
                 espaco_progresso.empty()
                 st.error(str(erro))
