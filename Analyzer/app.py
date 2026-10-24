@@ -15,6 +15,7 @@ from analisador import (
     carregar_deck_de_texto,
     distribuicao_cores,
 )
+from pagina_budget import pagina_budget
 
 st.set_page_config(page_title="MTG - Deck Analyzer", page_icon="🃏", layout="wide")
 
@@ -179,45 +180,53 @@ def mostrar_resultado(resultado, avisos_leitura):
 # Página
 # ---------------------------------------------------------------------------
 
-st.title("MTG - Deck Analyzer")
-st.caption("Cole a lista do seu deck (Moxfield, Arena, MTGO ou texto simples) e veja "
-           "curva de mana, cores, preço e legalidade em cada formato.")
+st.title("Analisador de decks de Magic")
+def pagina_analisador():
+    st.caption("Cole a lista do seu deck (Moxfield, Arena, MTGO ou texto simples) e veja "
+               "curva de mana, cores, preço e legalidade em cada formato.")
 
-modo = st.radio("Como quer enviar o deck?", ["Colar a lista", "Enviar arquivo .txt"],
-                horizontal=True)
+    modo = st.radio("Como quer enviar o deck?", ["Colar a lista", "Enviar arquivo .txt"],
+                    horizontal=True)
 
-texto = ""
-if modo == "Colar a lista":
-    texto = st.text_area("Lista do deck", height=280, placeholder=PLACEHOLDER)
-else:
-    arquivo = st.file_uploader("Arquivo do deck", type=["txt"])
-    if arquivo is not None:
-        texto = arquivo.getvalue().decode("utf-8-sig", errors="replace")
-
-if st.button("Analisar deck", type="primary"):
-    st.session_state.pop("analise", None)
-
-    if not texto.strip():
-        st.warning("Cole a lista ou envie um arquivo antes de analisar.")
+    texto = ""
+    if modo == "Colar a lista":
+        texto = st.text_area("Lista do deck", height=280, placeholder=PLACEHOLDER)
     else:
-        cartas, nome_deck, avisos_leitura = carregar_deck_de_texto(texto)
-        if not cartas:
-            st.error("Não encontrei nenhuma carta na lista. "
-                     "Use uma carta por linha, por exemplo: 4 Lightning Bolt.")
-        else:
-            try:
-                with st.spinner("Consultando a Scryfall (pode levar alguns segundos)..."):
-                    resultado = analisar_em_cache(cartas, nome_deck)
-            except ErroScryfall as erro:
-                st.error(str(erro))
-            else:
-                st.session_state["analise"] = {
-                    "resultado": resultado,
-                    "avisos_leitura": avisos_leitura,
-                }
+        arquivo = st.file_uploader("Arquivo do deck", type=["txt"])
+        if arquivo is not None:
+            texto = arquivo.getvalue().decode("utf-8-sig", errors="replace")
 
-analise = st.session_state.get("analise")
-if analise:
-    mostrar_resultado(**analise)
+    if st.button("Analisar deck", type="primary"):
+        st.session_state.pop("analise", None)
+
+        if not texto.strip():
+            st.warning("Cole a lista ou envie um arquivo antes de analisar.")
+        else:
+            cartas, nome_deck, avisos_leitura = carregar_deck_de_texto(texto)
+            if not cartas:
+                st.error("Não encontrei nenhuma carta na lista. "
+                         "Use uma carta por linha, por exemplo: 4 Lightning Bolt.")
+            else:
+                try:
+                    with st.spinner("Consultando a Scryfall (pode levar alguns segundos)..."):
+                        resultado = analisar_em_cache(cartas, nome_deck)
+                except ErroScryfall as erro:
+                    st.error(str(erro))
+                else:
+                    st.session_state["analise"] = {
+                        "resultado": resultado,
+                        "avisos_leitura": avisos_leitura,
+                    }
+
+    analise = st.session_state.get("analise")
+    if analise:
+        mostrar_resultado(**analise)
+
+
+aba_analise, aba_budget = st.tabs(["Analisar deck", "Versão budget"])
+with aba_analise:
+    pagina_analisador()
+with aba_budget:
+    pagina_budget()
 
 st.caption(f"Dados de cartas e preços: Scryfall · Analisador v{VERSAO}")

@@ -560,25 +560,21 @@ def distribuicao_cores(principal, base="identidade", incluir_terrenos=True):
     return {cor: contagem[cor] for cor in ordem if cor in contagem}
 
 
-def analisar_deck(cartas, nome_deck=None, progresso=None):
+def resolver_cartas(cartas, progresso=None):
     """
-    Analisa o deck e devolve um dicionário com todos os resultados.
-
-    'progresso' é uma função opcional que recebe uma mensagem (str) a cada etapa
-    demorada (ex.: busca individual de uma carta). Levanta ErroScryfall se a API
-    estiver inacessível.
+    Busca na Scryfall os dados de cada carta da lista (em lote, com plano B individual).
+    Retorna (entradas, falhas, avisos):
+      - entradas: [{"qtd", "zona", "data"}] com os dados completos da Scryfall
+      - falhas:   [{"qtd", "nome"}] das cartas que não foram encontradas
+      - avisos:   mensagens informativas (ex.: comandante inferido)
+    'progresso' é uma função opcional que recebe uma mensagem (str) a cada etapa demorada.
+    Levanta ErroScryfall se a API estiver inacessível.
     """
     def avisar_progresso(msg):
         if progresso:
             progresso(msg)
 
     avisos = []
-    total_cartas = 0
-    curva_mana = {}
-    preco_total = 0.0
-    tipos_count = {"Creature": 0, "Instant": 0, "Sorcery": 0, "Land": 0,
-                   "Artifact": 0, "Enchantment": 0, "Planeswalker": 0}
-
     avisar_progresso("Buscando informações do deck na Scryfall API...")
     dados_por_nome, nao_encontrados = buscar_cartas_em_lote(cartas, avisos)
 
@@ -604,6 +600,24 @@ def analisar_deck(cartas, nome_deck=None, progresso=None):
     entradas, aviso_cmd = inferir_comandante(entradas)
     if aviso_cmd:
         avisos.append(aviso_cmd)
+    return entradas, falhas_finais, avisos
+
+
+def analisar_deck(cartas, nome_deck=None, progresso=None):
+    """
+    Analisa o deck e devolve um dicionário com todos os resultados.
+
+    'progresso' é uma função opcional que recebe uma mensagem (str) a cada etapa
+    demorada (ex.: busca individual de uma carta). Levanta ErroScryfall se a API
+    estiver inacessível.
+    """
+    total_cartas = 0
+    curva_mana = {}
+    preco_total = 0.0
+    tipos_count = {"Creature": 0, "Instant": 0, "Sorcery": 0, "Land": 0,
+                   "Artifact": 0, "Enchantment": 0, "Planeswalker": 0}
+
+    entradas, falhas_finais, avisos = resolver_cartas(cartas, progresso)
 
     principal_entradas = [e for e in entradas if e["zona"] != "side"]
     sideboard_entradas = [e for e in entradas if e["zona"] == "side"]
